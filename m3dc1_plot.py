@@ -44,7 +44,7 @@ class M3DC1_xsection(object):
                                               # and which index corresponds to which
         self.r = idlsave_dict['r']  # grid locations (401)
         self.z = idlsave_dict['z']
-        self.psin2d = np.reshape(np.transpose(idlsave_dict['psinrz']), (len(self.r), len(self.z)))  # psinorm on R, Z grid
+        self.psin2d = np.transpose(np.reshape(idlsave_dict['psinrz'], (len(self.r), len(self.z))))  # psinorm on R, Z grid
         
         self.eqs = {}  # arrays are transposed from IDL->Python, need to flip them here
         self.perts = {}
@@ -269,7 +269,7 @@ class M3DC1_xsection(object):
             xphase = np.ma.masked_invalid(xphase)
     
         phase_deg = np.rad2deg(xphase)
-        r_grid, z_grid = np.meshgrid(self.r, self.z)
+        z_grid, r_grid = np.meshgrid(self.z, self.r)
     
         f = plt.figure()
         if cmap is None:
@@ -302,7 +302,7 @@ class M3DC1_xsection(object):
 
           cmap    Set to the colormap that you want, or choose 'contour' for a contour plot
         """
-        r_grid, z_grid = np.meshgrid(self.r, self.z)
+        z_grid, r_grid = np.meshgrid(self.z, self.r)
         
         psin = self.psin2d.copy()
         
@@ -357,7 +357,7 @@ class M3DC1_xsection(object):
 
 
     # -----------------------------------------------------------------------
-    def plot_xphase_1D(self, zloc = 0, r_range = [2.2, 2.4], ul_phase = 0, plot_eq = True,
+    def plot_xphase_1D(self, zloc = 0, r_range = [2.2, 2.276], ul_phase = 0, plot_eq = True,
                        linfac = -2.5 * 4 / np.pi):
         """
         Plot the cross phase of the perturbed quantities
@@ -376,8 +376,9 @@ class M3DC1_xsection(object):
             print "code not ready for phase not = 0 yet"
             return
         
+        dr = np.min(np.abs(np.diff(self.r)))
         z_ind = np.argmin(np.abs(self.z - zloc))
-        r_inds = np.where((self.r > r_range[0]) & (self.r < r_range[1]))
+        r_inds = np.where((self.r >= r_range[0] - dr) & (self.r <= r_range[1] + dr))
         Rlocs = self.r[r_inds]
     
         perts_comp1 = self.perts[fields[0] + '_l'][r_inds, z_ind][0,:] + \
@@ -422,47 +423,58 @@ class M3DC1_xsection(object):
         pres = self.eqs['p'][r_inds, z_ind][0,:]
         grad_p = np.abs(np.diff(pres) / np.diff(Rlocs))
         Rlocs_mid = Rlocs[:-1] + np.diff(Rlocs) / 2
+        
+        # Find where psi_n = 1
+        
+        psin_1D = self.psin2d[r_inds, z_ind][0,:]
+        psin_func = scinter.interp1d(psin_1D, Rlocs)
+        Rloc_sep = psin_func(1)
     
         # Plot everything
 
-        # f, (ax0, ax1, ax2, ax3) = plt.subplots(4, sharex = True)
-        f, (ax0, ax1, ax2, ax3, ax4) = plt.subplots(5, sharex = True)
+        f, (ax0, ax1, ax2, ax3) = plt.subplots(4, sharex = True, figsize=(8,10))
         
-        ax0.plot(Rlocs, np.rad2deg(xphase), 'k', lw = 3)
+        ax0.plot(Rlocs, np.rad2deg(xphase), 'k', lw = 3, zorder = 5)
         ax0.set_title('$\phi$_' + fields[0] + ' - ' + '$\phi$_' + fields[1] +
                       ' (Z = {0:.3f}'.format(self.z[z_ind]) + ' m)')
         ax0.set_ylim([-180, 180])
         ax0.set_yticks(np.arange(-180, 181, 90))
         ax0.set_yticklabels(['-180$^\circ$', '-90$^\circ$', '0$^\circ$', '90$^\circ$', '180$^\circ$'])
-        ax0.grid('on')
         
-        ax1.plot(Rlocs_mid, grad_p/1e3, 'g', lw=2)
-        ax1.set_ylabel('|$\\nabla$P| (kPa / m)')
-        ax1.set_yticks(range(0, 450, 100))
-        ax1.grid('on')
+        ax1.plot(Rlocs_mid, grad_p/1e3, 'g', lw=2, zorder = 5)
+        # ax1.set_ylabel('|$\\nabla$P| (kPa / m)')
+        ax1.set_ylabel('|$\\nabla$P|')
+        ax1.set_yticks(range(0, 650, 200))
         
-        ax2.semilogy(Rlocs, np.abs(amp1), 'b', lw=2, label = 'Pert')
-        ax2.set_ylabel('$\delta$' + fields[0])
+        ax2.semilogy(Rlocs, np.abs(amp1), 'b', lw=2, label = 'Pert n = 3', zorder = 5)
+        # ax2.set_ylabel('$\delta' + fields[0])
+        ax2.set_ylabel('$\delta$n$_e$')
 
-        ax3.semilogy(Rlocs, np.abs(amp2), 'r', lw=2, label = 'Pert')
-        ax3.set_ylabel('$\delta$' + fields[1])
+        ax3.semilogy(Rlocs, np.abs(amp2), 'r', lw=2, label = 'Pert n = 3', zorder = 5)
+        # ax3.set_ylabel('$\delta$' + fields[1])
+        ax3.set_ylabel('$\delta$T$_e$')
         ax3.set_xlabel('R (m)')
         
         for i, a in enumerate([ax2, ax3]):
             if fields[i] == 'ne':
                 a.set_ylim([2e16, 4e19])
             elif fields[i] == 'te':
-                a.set_ylim([1, 3e3])
+                a.set_ylim([5, 3e3])
+            
+        for a in [ax0, ax1, ax2, ax3]:
             a.grid('on')
+            y_lims = a.get_ylim()
+            a.plot([Rloc_sep, Rloc_sep], y_lims, '--k', lw = 3, zorder = 1)
             
         if plot_eq:
-            ax2.semilogy(Rlocs, eqs1, '--b', lw=1, label = 'Eq')
-            ax3.semilogy(Rlocs, eqs2, '--r', lw=1, label = 'Eq')
-            ax3.legend(loc='best', fontsize=14)
+            ax2.semilogy(Rlocs, eqs1, '--b', lw=1, label = 'n = 0', zorder = 4)
+            ax2.legend(loc = 'center left', fontsize = 14)
+            ax3.semilogy(Rlocs, eqs2, '--r', lw=1, label = 'n = 0', zorder = 4)
+            ax3.legend(loc = 'center left', fontsize=14)
             
-        ax4.plot(Rlocs,self.psin2d[r_inds, z_ind][0,:])
-        
-        plt.tight_layout()
+        ax3.set_xlim(r_range)
+            
+        plt.tight_layout(pad = 0.5)
         plt.show(block = False)
     
             
